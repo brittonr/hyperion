@@ -34,3 +34,5 @@ vendor/
 .trigger-debug
 .trigger
 valence/
+
+.pi/
