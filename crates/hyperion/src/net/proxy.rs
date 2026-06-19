@@ -467,13 +467,11 @@ async fn inner_iroh(config: IrohProxyBind, command_channel: CommandChannel) {
         }
     };
 
-    match endpoint.node_addr().await {
-        Ok(addr) => info!(endpoint_addr = ?addr, "Iroh proxy listener started"),
-        Err(error) => warn!(
-            ?error,
-            "Iroh proxy listener started without resolved address"
-        ),
-    }
+    info!(
+        endpoint_id = %endpoint.node_id(),
+        bound_sockets = ?endpoint.bound_sockets(),
+        "Iroh proxy listener started"
+    );
 
     let next_proxy_id = Arc::new(AtomicU64::new(0));
 

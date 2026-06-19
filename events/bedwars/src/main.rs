@@ -14,6 +14,7 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 const DEFAULT_SERVER_IP: &str = "0.0.0.0";
 const DEFAULT_SERVER_PORT: u16 = 35565;
+const PROCESS_NAME_ARG_COUNT: usize = 1;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, ValueEnum)]
 #[serde(rename_all = "kebab-case")]
@@ -105,6 +106,30 @@ fn proxy_bind_from_args(
     }
 }
 
+fn cli_args_present(arg_count: usize) -> bool {
+    arg_count > PROCESS_NAME_ARG_COUNT
+}
+
+fn args_from_config() -> Args {
+    if cli_args_present(std::env::args_os().len()) {
+        return Args::parse();
+    }
+
+    match envy::prefixed("BEDWARS_").from_env::<Args>() {
+        Ok(args) => {
+            tracing::info!("Loaded configuration from environment variables");
+            args
+        }
+        Err(e) => {
+            tracing::info!(
+                "Failed to load from environment: {}, falling back to command line arguments",
+                e
+            );
+            Args::parse()
+        }
+    }
+}
+
 fn setup_logging() {
     tracing::subscriber::set_global_default(
         Registry::default()
@@ -126,20 +151,7 @@ fn main() -> anyhow::Result<()> {
 
     setup_logging();
 
-    // Try to load config from environment variables
-    let args = match envy::prefixed("BEDWARS_").from_env::<Args>() {
-        Ok(args) => {
-            tracing::info!("Loaded configuration from environment variables");
-            args
-        }
-        Err(e) => {
-            tracing::info!(
-                "Failed to load from environment: {}, falling back to command line arguments",
-                e
-            );
-            Args::parse()
-        }
-    };
+    let args = args_from_config();
 
     let address = format!("{ip}:{port}", ip = args.ip, port = args.port);
     let address = address
@@ -170,6 +182,16 @@ mod tests {
             iroh_bind_addr: None,
             iroh_allowed_proxy_id: Vec::new(),
         }
+    }
+
+    #[test]
+    fn cli_args_present_rejects_process_name_only() {
+        assert!(!cli_args_present(PROCESS_NAME_ARG_COUNT));
+    }
+
+    #[test]
+    fn cli_args_present_accepts_extra_args() {
+        assert!(cli_args_present(PROCESS_NAME_ARG_COUNT + 1));
     }
 
     #[test]

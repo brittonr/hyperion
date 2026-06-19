@@ -279,18 +279,12 @@ pub async fn run_proxy_iroh(
         .await
         .context("failed to bind Iroh proxy endpoint")?;
     let server_addr = server.node_addr();
-    match endpoint.node_addr().await {
-        Ok(endpoint_addr) => info!(
-            endpoint_addr = ?endpoint_addr,
-            server_addr = ?server_addr,
-            "Starting Hyperion Proxy over Iroh"
-        ),
-        Err(error) => warn!(
-            ?error,
-            server_addr = ?server_addr,
-            "Starting Hyperion Proxy over Iroh without resolved local address"
-        ),
-    }
+    info!(
+        endpoint_id = %endpoint.node_id(),
+        bound_sockets = ?endpoint.bound_sockets(),
+        server_addr = ?server_addr,
+        "Starting Hyperion Proxy over Iroh"
+    );
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(None);
 

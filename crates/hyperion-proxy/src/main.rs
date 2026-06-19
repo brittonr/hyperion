@@ -17,6 +17,7 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 const DEFAULT_PROXY_ADDR: &str = "0.0.0.0:25565";
 const DEFAULT_SERVER_ADDR: &str = "127.0.0.1:35565";
+const PROCESS_NAME_ARG_COUNT: usize = 1;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, ValueEnum)]
 #[serde(rename_all = "kebab-case")]
@@ -205,6 +206,30 @@ where
     }
 }
 
+fn cli_args_present(arg_count: usize) -> bool {
+    arg_count > PROCESS_NAME_ARG_COUNT
+}
+
+fn params_from_config() -> Params {
+    if cli_args_present(std::env::args_os().len()) {
+        return Params::parse();
+    }
+
+    match envy::prefixed("HYPERION_PROXY_").from_env::<Params>() {
+        Ok(params) => {
+            info!("Loaded configuration from environment variables");
+            params
+        }
+        Err(e) => {
+            info!(
+                "Failed to load from environment: {}, falling back to command line arguments",
+                e
+            );
+            Params::parse()
+        }
+    }
+}
+
 fn setup_logging() {
     // Build a custom subscriber
     tracing_subscriber::fmt()
@@ -223,20 +248,7 @@ async fn main() -> anyhow::Result<()> {
 
     setup_logging();
 
-    // Try to load params from environment variables
-    let params = match envy::prefixed("HYPERION_PROXY_").from_env::<Params>() {
-        Ok(params) => {
-            info!("Loaded configuration from environment variables");
-            params
-        }
-        Err(e) => {
-            info!(
-                "Failed to load from environment: {}, falling back to command line arguments",
-                e
-            );
-            Params::parse()
-        }
-    };
+    let params = params_from_config();
 
     let proxy_addr = ProxyAddress::parse(&params.proxy_addr)
         .map_err(|err| anyhow::anyhow!("failed to parse proxy address: {err}"))?;
@@ -323,6 +335,16 @@ mod tests {
             iroh_secret_key: None,
             iroh_bind_addr: None,
         }
+    }
+
+    #[test]
+    fn cli_args_present_rejects_process_name_only() {
+        assert!(!cli_args_present(PROCESS_NAME_ARG_COUNT));
+    }
+
+    #[test]
+    fn cli_args_present_accepts_extra_args() {
+        assert!(cli_args_present(PROCESS_NAME_ARG_COUNT + 1));
     }
 
     #[test]
