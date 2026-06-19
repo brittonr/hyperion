@@ -25,6 +25,7 @@ glam = { workspace = true, features = ["serde"] }
 heapless = { workspace = true }
 heed = { workspace = true }
 humantime = { workspace = true }
+iroh = { workspace = true }
 hyperion-crafting = { workspace = true }
 hyperion-inventory = { workspace = true }
 hyperion-nerd-font = { workspace = true }

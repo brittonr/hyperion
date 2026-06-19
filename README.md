@@ -179,7 +179,7 @@ On a production environment, the game server and each proxy should run on separa
 
 ### Generating keys and certificates
 
-The connection between the game server and the proxies are encrypted through mTLS to ensure that the connection is secure and authenticate the proxies.
+The TCP connection between the game server and the proxies is encrypted through mTLS to ensure that the connection is secure and authenticate the proxies. Iroh transport uses Iroh node keys instead of these certificates.
 
 > [!WARNING]
 > All private keys must be stored securely, and it is strongly recommended to generate the private keys on the server that will use them instead of transferring them over the Internet. Malicious proxies that have access to a private key can circumvent player authentication and can cause the game server to exhibit undefined behavior which can potentially lead to arbitrary code execution on the game server. If any private key has been compromised, redo this section to create new keys.
@@ -227,7 +227,13 @@ Then, transfer `server.crt` to the target server.
 
 `server.csr` and `server.crt` on the certificate authority server and `server.csr` on the target server are no longer needed and may be deleted.
 
-`server.crt` is the target server's certificate and `server_private_key.pem` is the target server's private key. When running the game server or the proxy, make sure to pass `--cert server.crt --private-key server_private_key.pem` as a command line flag.
+`server.crt` is the target server's certificate and `server_private_key.pem` is the target server's private key. When running the game server or the proxy with TCP transport, make sure to pass `--cert server.crt --private-key server_private_key.pem` as a command line flag.
+
+### Server↔proxy transport
+
+TCP remains the default server↔proxy transport and requires `--root-ca-cert`, `--cert`, and `--private-key` on both sides.
+
+Iroh is also first-class. Start the game server with `--proxy-transport iroh` and note the logged Iroh `NodeAddr`. Start each proxy with `--server-transport iroh --iroh-server-id <server-public-key>`. Add `--iroh-server-addr <ip:port>` or `--iroh-server-relay <relay-url>` when the proxy cannot rely on Iroh discovery alone; the compatible Iroh release currently supports one relay URL per server address. Use `--iroh-secret-key` on either side for stable node identity, and `--iroh-allowed-proxy-id <proxy-public-key>` on the game server to restrict which proxy nodes may connect.
 
 ### Without cloning
 

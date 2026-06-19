@@ -18,6 +18,7 @@ clap = { workspace = true }
 glam = { workspace = true }
 heapless = { workspace = true }
 hyperion-proto = { workspace = true }
+iroh = { workspace = true }
 more-asserts = { workspace = true }
 slotmap = { workspace = true }
 tracing = { workspace = true }

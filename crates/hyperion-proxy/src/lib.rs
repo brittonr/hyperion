@@ -16,11 +16,13 @@
     clippy::future_not_send
 )]
 
-use std::{fmt::Debug, path::Path, sync::Arc};
+use std::{fmt::Debug, net::SocketAddr, path::Path, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use colored::Colorize;
-use hyperion_proto::ArchivedServerToProxyMessage;
+use hyperion_proto::{ArchivedServerToProxyMessage, ProxyToServerMessage};
+use iroh::{Endpoint as IrohEndpoint, NodeAddr, PublicKey, RelayUrl, SecretKey};
+use rkyv::util::AlignedVec;
 use rustc_hash::FxBuildHasher;
 use rustls::{RootCertStore, client::ClientConfig};
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName, pem::PemObject};
@@ -33,17 +35,94 @@ use tokio_util::net::Listener;
 use tracing::{Instrument, debug, error, info, info_span, instrument, trace, warn};
 
 use crate::{
-    cache::BufferedEgress, data::PlayerHandle, egress::Egress, player::initiate_player_connection,
-    server_sender::launch_server_writer,
+    cache::BufferedEgress,
+    data::PlayerHandle,
+    egress::Egress,
+    player::initiate_player_connection,
+    server_sender::{ServerSender, launch_server_writer},
 };
 
 /// 4 KiB
 const DEFAULT_BUFFER_SIZE: usize = 4 * 1024;
 
+#[derive(Debug, Clone)]
+pub struct IrohServerConnection {
+    pub server_id: PublicKey,
+    pub direct_addrs: Vec<SocketAddr>,
+    pub relay_urls: Vec<RelayUrl>,
+    pub secret_key: Option<SecretKey>,
+    pub bind_addr: Option<SocketAddr>,
+}
+
+impl IrohServerConnection {
+    #[must_use]
+    pub fn node_addr(&self) -> NodeAddr {
+        NodeAddr::from_parts(
+            self.server_id,
+            self.relay_urls.first().cloned(),
+            self.direct_addrs.clone(),
+        )
+    }
+}
+
+fn validate_iroh_server_connection(server: &IrohServerConnection) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        server.relay_urls.len() <= MAX_SUPPORTED_IROH_RELAY_URLS,
+        "Iroh 0.35 supports at most one relay URL per server address"
+    );
+    Ok(())
+}
+
 /// Maximum number of pending messages in a player's communication channel.
 /// If this limit is exceeded, the player will be disconnected to prevent
 /// memory exhaustion from slow or unresponsive clients.
 const MAX_PLAYER_PENDING_MESSAGES: usize = 1_024;
+const SERVER_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
+const MAX_SUPPORTED_IROH_RELAY_URLS: usize = 1;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const IROH_SECRET_KEY_BYTES: usize = 32;
+    const SERVER_KEY_SEED: u8 = 1;
+    const FIRST_RELAY_URL: &str = "https://relay-one.example.com";
+    const SECOND_RELAY_URL: &str = "https://relay-two.example.com";
+
+    fn relay_url(value: &str) -> RelayUrl {
+        value.parse().unwrap()
+    }
+
+    fn server_connection(relay_urls: Vec<RelayUrl>) -> IrohServerConnection {
+        let secret_key = SecretKey::from([SERVER_KEY_SEED; IROH_SECRET_KEY_BYTES]);
+        IrohServerConnection {
+            server_id: secret_key.public(),
+            direct_addrs: Vec::new(),
+            relay_urls,
+            secret_key: None,
+            bind_addr: None,
+        }
+    }
+
+    #[test]
+    fn iroh_server_connection_accepts_single_relay_url() {
+        let server = server_connection(vec![relay_url(FIRST_RELAY_URL)]);
+
+        assert!(validate_iroh_server_connection(&server).is_ok());
+    }
+
+    #[test]
+    fn iroh_server_connection_rejects_multiple_relay_urls() {
+        let server = server_connection(vec![
+            relay_url(FIRST_RELAY_URL),
+            relay_url(SECOND_RELAY_URL),
+        ]);
+
+        let err = validate_iroh_server_connection(&server).unwrap_err();
+
+        assert!(err.to_string().contains("at most one relay URL"));
+    }
+}
 
 pub mod cache;
 pub mod data;
@@ -52,6 +131,13 @@ pub mod player;
 pub mod server_sender;
 pub mod util;
 
+pub use hyperion_proto::IROH_PROXY_ALPN;
+
+fn proxy_ready_message() -> anyhow::Result<AlignedVec> {
+    rkyv::to_bytes::<rkyv::rancor::Error>(&ProxyToServerMessage::ProxyReady)
+        .context("failed to encode proxy ready message")
+}
+
 #[tracing::instrument(level = "trace", skip_all)]
 async fn connect(addr: impl ToSocketAddrs + Debug + Clone) -> TcpStream {
     loop {
@@ -59,7 +145,7 @@ async fn connect(addr: impl ToSocketAddrs + Debug + Clone) -> TcpStream {
             return stream;
         }
 
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::time::sleep(SERVER_CONNECT_RETRY_DELAY).await;
     }
 }
 
@@ -160,7 +246,7 @@ pub async fn run_proxy(
                 let server_socket = connect(server_addr.clone()).await;
                 server_socket.set_nodelay(true).unwrap();
 
-                if let Err(e) = connect_to_server_and_run_proxy(&mut listener, server_socket, server_name.clone(), config.clone(), shutdown_rx.clone(), shutdown_tx.clone()).await {
+                if let Err(e) = connect_to_tcp_server_and_run_proxy(&mut listener, server_socket, server_name.clone(), config.clone(), shutdown_rx.clone(), shutdown_tx.clone()).await {
                     error!("Error connecting to server: {e:?}");
                 }
 
@@ -171,7 +257,130 @@ pub async fn run_proxy(
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-async fn connect_to_server_and_run_proxy(
+pub async fn run_proxy_iroh(
+    mut listener: impl HyperionListener,
+    server: IrohServerConnection,
+) -> anyhow::Result<()> {
+    validate_iroh_server_connection(&server)?;
+
+    let mut builder = IrohEndpoint::builder().discovery_n0();
+    if let Some(secret_key) = server.secret_key.clone() {
+        builder = builder.secret_key(secret_key);
+    }
+    if let Some(bind_addr) = server.bind_addr {
+        builder = match bind_addr {
+            SocketAddr::V4(addr) => builder.bind_addr_v4(addr),
+            SocketAddr::V6(addr) => builder.bind_addr_v6(addr),
+        };
+    }
+
+    let endpoint = builder
+        .bind()
+        .await
+        .context("failed to bind Iroh proxy endpoint")?;
+    let server_addr = server.node_addr();
+    match endpoint.node_addr().await {
+        Ok(endpoint_addr) => info!(
+            endpoint_addr = ?endpoint_addr,
+            server_addr = ?server_addr,
+            "Starting Hyperion Proxy over Iroh"
+        ),
+        Err(error) => warn!(
+            ?error,
+            server_addr = ?server_addr,
+            "Starting Hyperion Proxy over Iroh without resolved local address"
+        ),
+    }
+
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(None);
+
+    #[cfg(unix)]
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .context("failed to register SIGTERM handler")?;
+
+    #[cfg(unix)]
+    let mut sigquit = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::quit())
+        .context("failed to register SIGQUIT handler")?;
+
+    #[cfg(unix)]
+    tokio::spawn({
+        let shutdown_tx = shutdown_tx.clone();
+        async move {
+            tokio::select! {
+                _ = sigterm.recv() => {
+                    warn!("SIGTERM received, shutting down");
+                    shutdown_tx.send(Some(ShutdownType::Full)).unwrap();
+                }
+                _ = sigquit.recv() => {
+                    warn!("SIGQUIT received, shutting down");
+                    shutdown_tx.send(Some(ShutdownType::Full)).unwrap();
+                }
+            }
+        }
+    });
+
+    loop {
+        let mut shutdown_rx2 = shutdown_rx.clone();
+
+        if *shutdown_rx2.borrow() == Some(ShutdownType::Full) {
+            break Ok(());
+        }
+
+        tokio::select! {
+            _ = shutdown_rx2.wait_for(|value| *value == Some(ShutdownType::Full)) => {
+                warn!("Received shutdown signal, exiting Iroh proxy loop");
+                break Ok(());
+            }
+            () = async {
+                shutdown_tx.send(None).unwrap();
+
+                let binding_help = "~ Make sure the Iroh event server is running".dimmed();
+                info!("⏳ Binding to Iroh server... {binding_help}");
+
+                if let Err(e) = connect_to_iroh_server_and_run_proxy(&mut listener, endpoint.clone(), server_addr.clone(), shutdown_rx.clone(), shutdown_tx.clone()).await {
+                    error!("Error connecting to Iroh server: {e:?}");
+                }
+            } => {}
+        }
+    }
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn connect_to_iroh_server_and_run_proxy(
+    listener: &mut impl HyperionListener,
+    endpoint: IrohEndpoint,
+    server_addr: NodeAddr,
+    shutdown_rx: tokio::sync::watch::Receiver<Option<ShutdownType>>,
+    shutdown_tx: tokio::sync::watch::Sender<Option<ShutdownType>>,
+) -> anyhow::Result<()> {
+    let connection = endpoint
+        .connect(server_addr, IROH_PROXY_ALPN)
+        .await
+        .context("failed to connect to Iroh game server")?;
+    let (server_write, server_read) = connection
+        .open_bi()
+        .await
+        .context("failed to open Iroh proxy stream")?;
+    let server_sender = launch_server_writer(server_write);
+    server_sender
+        .send(proxy_ready_message()?)
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to send proxy ready message: {err}"))?;
+
+    info!("🔗 Connected to Iroh server, accepting player connections");
+    let result = run_proxy_on_server_stream(
+        listener,
+        server_read,
+        server_sender,
+        shutdown_rx,
+        shutdown_tx,
+    )
+    .await;
+    result
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn connect_to_tcp_server_and_run_proxy(
     listener: &mut impl HyperionListener,
     server_socket: TcpStream,
     server_name: ServerName<'static>,
@@ -179,7 +388,7 @@ async fn connect_to_server_and_run_proxy(
     shutdown_rx: tokio::sync::watch::Receiver<Option<ShutdownType>>,
     shutdown_tx: tokio::sync::watch::Sender<Option<ShutdownType>>,
 ) -> anyhow::Result<()> {
-    info!("🔗 Connected to server, accepting connections");
+    info!("🔗 Connected to TCP server, accepting connections");
 
     let connector = TlsConnector::from(config);
     let server_stream = connector
@@ -189,7 +398,28 @@ async fn connect_to_server_and_run_proxy(
 
     let (server_read, server_write) = tokio::io::split(server_stream);
     let server_sender = launch_server_writer(server_write);
+    let result = run_proxy_on_server_stream(
+        listener,
+        server_read,
+        server_sender,
+        shutdown_rx,
+        shutdown_tx,
+    )
+    .await;
+    result
+}
 
+#[tracing::instrument(level = "trace", skip_all)]
+async fn run_proxy_on_server_stream<R>(
+    listener: &mut impl HyperionListener,
+    server_read: R,
+    server_sender: ServerSender,
+    shutdown_rx: tokio::sync::watch::Receiver<Option<ShutdownType>>,
+    shutdown_tx: tokio::sync::watch::Sender<Option<ShutdownType>>,
+) -> anyhow::Result<()>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+{
     let player_registry = papaya::HashMap::default();
     let player_registry: &'static papaya::HashMap<u64, PlayerHandle, FxBuildHasher> =
         Box::leak(Box::new(player_registry));

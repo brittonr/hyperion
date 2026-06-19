@@ -37,6 +37,7 @@ pub struct RequestSubscribeChannelPackets<'a> {
 
 #[derive(Archive, Deserialize, Serialize, Clone, PartialEq, Debug)]
 pub enum ProxyToServerMessage<'a> {
+    ProxyReady,
     PlayerConnect(PlayerConnect),
     PlayerDisconnect(PlayerDisconnect<'a>),
     PlayerPackets(PlayerPackets<'a>),

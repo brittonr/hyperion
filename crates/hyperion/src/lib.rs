@@ -59,7 +59,10 @@ pub use valence_ident;
 use crate::{
     command_channel::{CommandChannel, CommandChannelPlugin},
     ingress::IngressPlugin,
-    net::{Compose, ConnectionId, IoBuf, MAX_PACKET_SIZE, PacketDecoder, proxy::init_proxy_comms},
+    net::{
+        Compose, ConnectionId, IoBuf, MAX_PACKET_SIZE, PacketDecoder,
+        proxy::{init_proxy_comms, init_proxy_transport_comms},
+    },
     runtime::AsyncRuntime,
     simulation::{IgnMap, SimPlugin, StreamLookup, blocks::Blocks},
     spatial::SpatialPlugin,
@@ -72,6 +75,10 @@ pub mod net;
 pub mod simulation;
 pub mod spatial;
 pub mod storage;
+
+pub use hyperion_proto::IROH_PROXY_ALPN;
+pub use iroh::{PublicKey as IrohPublicKey, SecretKey as IrohSecretKey};
+pub use net::proxy::{IrohProxyBind, ProxyBind};
 
 pub trait PacketBundle {
     fn encode_including_ids(self, w: impl Write) -> anyhow::Result<()>;
@@ -249,12 +256,20 @@ impl Plugin for HyperionCore {
 
         app.add_plugins(CommandChannelPlugin);
 
-        if let Some(address) = app.world().get_resource::<Endpoint>() {
+        let command_channel = app.world().resource::<CommandChannel>();
+        if let Some(proxy_bind) = app.world().get_resource::<ProxyBind>() {
+            let crypto = app.world().get_resource::<Crypto>().cloned();
+            init_proxy_transport_comms(
+                &runtime,
+                command_channel.clone(),
+                proxy_bind.clone(),
+                crypto,
+            );
+        } else if let Some(address) = app.world().get_resource::<Endpoint>() {
             let crypto = app.world().resource::<Crypto>();
-            let command_channel = app.world().resource::<CommandChannel>();
             init_proxy_comms(&runtime, command_channel.clone(), address.0, crypto.clone());
         } else {
-            warn!("Endpoint was not set while loading HyperionCore");
+            warn!("ProxyBind or Endpoint was not set while loading HyperionCore");
         }
 
         app.insert_resource(Compose::new(

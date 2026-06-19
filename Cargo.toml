@@ -77,6 +77,7 @@ heed = "0.21.0"
 hex = '0.4.3'
 humantime = '2.1.0'
 hyperion-proxy = { path = "crates/hyperion-proxy" }
+iroh = '=0.35.0'
 itertools = "0.14.0"
 kanal = '0.1.1'
 libc = '0.2.172'
@@ -113,7 +114,7 @@ tar = '0.4.41'
 thiserror = '2.0.12'
 thread_local = '1.1.8'
 tikv-jemallocator = '0.6.0'
-time = '0.3.41'
+time = '=0.3.41'
 tokio = '1.45.0'
 tokio-rustls = { version = '0.26.2', default-features = false, features = ['logging', 'tls12'] }
 toml = '0.8.14'

@@ -6,7 +6,7 @@
 use std::net::SocketAddr;
 
 use bevy::prelude::*;
-use hyperion::{Crypto, Endpoint, HyperionCore, simulation::packet_state, spatial::Spatial};
+use hyperion::{Crypto, HyperionCore, ProxyBind, simulation::packet_state, spatial::Spatial};
 use hyperion_proxy_module::SetProxyAddress;
 use valence_text::IntoText;
 
@@ -138,15 +138,27 @@ impl Plugin for BedwarsPlugin {
 }
 
 pub fn init_game(address: SocketAddr, crypto: Crypto) -> anyhow::Result<()> {
-    let mut app = App::new();
+    init_game_with_proxy(ProxyBind::Tcp(address), Some(crypto))
+}
 
-    app.insert_resource(Endpoint::from(address));
-    app.insert_resource(crypto);
+pub fn init_game_with_proxy(proxy_bind: ProxyBind, crypto: Option<Crypto>) -> anyhow::Result<()> {
+    let mut app = App::new();
+    let tcp_address = match &proxy_bind {
+        ProxyBind::Tcp(address) => Some(*address),
+        ProxyBind::Iroh(_) => None,
+    };
+
+    app.insert_resource(proxy_bind);
+    if let Some(crypto) = crypto {
+        app.insert_resource(crypto);
+    }
     app.add_plugins((HyperionCore, BedwarsPlugin));
-    app.world_mut().trigger(SetProxyAddress {
-        server: address.to_string(),
-        ..SetProxyAddress::default()
-    });
+    if let Some(address) = tcp_address {
+        app.world_mut().trigger(SetProxyAddress {
+            server: address.to_string(),
+            ..SetProxyAddress::default()
+        });
+    }
 
     app.run();
 
