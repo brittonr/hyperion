@@ -87,7 +87,7 @@ Multiple channels are available for support:
 
 ### Code Quality Enforcement
 
-We use pre-commit hooks to maintain code quality:
+We use pre-commit hooks to maintain code quality. Run them from the Nix dev shell so `cargo-octet`, `cargo-deny`, and `cargo-machete` are on `PATH`.
 
 1. **Installation**
    ```bash
@@ -107,6 +107,7 @@ We use pre-commit hooks to maintain code quality:
 #### Automated Checks
 The pre-commit configuration handles:
 - Rust code formatting via `rustfmt`
+- Octet Tiger Style lints via `cargo-octet check`
 - Additional code quality verifications
 
 Hooks run automatically on `git commit`. If checks fail:

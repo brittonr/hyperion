@@ -1,0 +1,2 @@
+# Octet lint tuning. Runner policy lives in Cargo.toml under [workspace.metadata.octet].
+[octet]

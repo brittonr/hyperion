@@ -7,6 +7,7 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    octet.url = "git+ssh://git@github.com/OnixResearch/octet.git";
   };
 
   outputs =
@@ -14,6 +15,7 @@
       self,
       nixpkgs,
       rust-overlay,
+      octet,
       ...
     }:
     let
@@ -48,6 +50,11 @@
             cargo-deny
             cargo-machete
             cargo-nextest
+          ];
+
+          devNativeBuildInputs = nativeBuildInputs ++ [
+            octet.packages.${system}.cargo-octet
+            pkgs.pre-commit
           ];
 
           buildInputs =
@@ -132,7 +139,8 @@
         in
         {
           devShells.default = pkgs.mkShell {
-            inherit buildInputs nativeBuildInputs;
+            inherit buildInputs;
+            nativeBuildInputs = devNativeBuildInputs;
             RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
           };
 

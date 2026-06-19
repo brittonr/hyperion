@@ -51,6 +51,10 @@ resolver = '2'
 [workspace.metadata.cargo-machete]
 ignored = ["quote", "serde_json", "syn", "valence_build_utils"]
 
+[workspace.metadata.octet]
+default_scope = ["--workspace"]
+cargo_check_args = ["--all-targets", "--all-features"]
+
 [workspace.dependencies]
 anyhow = '1.0.98'
 approx = '0.5.1'

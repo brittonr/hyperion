@@ -70,6 +70,13 @@ repos:
       #        types: [rust]
       #        pass_filenames: false  # Clippy should check the entire project
       #        verbose: true
+      - id: cargo-octet
+        name: cargo octet check
+        description: Lint Rust code with Octet Tiger Style checks
+        entry: cargo-octet check
+        language: system
+        types: [ rust ]
+        pass_filenames: false
       - id: cargo-machete
         name: cargo machete
         description: Find unused dependencies in Cargo.toml
