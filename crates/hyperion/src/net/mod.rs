@@ -279,6 +279,12 @@ impl Compose {
         &mut self.io_buf
     }
 
+    /// Returns the number of proxy transports currently registered for outbound egress.
+    #[must_use]
+    pub fn connected_proxy_count(&self) -> usize {
+        self.io_buf.connected_proxy_count()
+    }
+
     /// Broadcast a packet within a certain region.
     ///
     /// See <https://github.com/andrewgazelka/hyperion-proto/blob/main/src/server_to_proxy.proto#L17-L22>
@@ -397,6 +403,12 @@ impl IoBuf {
 
     pub(crate) fn remove_proxy(&mut self, proxy_id: ProxyId) -> Option<EgressComm> {
         self.egress_comms.remove(&proxy_id)
+    }
+
+    /// Returns the number of proxy transports currently registered for outbound egress.
+    #[must_use]
+    pub fn connected_proxy_count(&self) -> usize {
+        self.egress_comms.len()
     }
 }
 

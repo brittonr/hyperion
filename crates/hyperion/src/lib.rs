@@ -25,9 +25,16 @@
 #![feature(thread_local)]
 
 pub const CHUNK_HEIGHT_SPAN: u32 = 384; // 512; // usually 384
+const DEFAULT_CONFIG_PATH: &str = "run/config.toml";
 
 use std::{
-    alloc::Allocator, fmt::Debug, io::Write, net::SocketAddr, path::Path, sync::Arc, time::Duration,
+    alloc::Allocator,
+    fmt::Debug,
+    io::Write,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
 };
 
 use bevy::prelude::*;
@@ -144,6 +151,47 @@ pub struct Crypto {
     pub key: PrivateKeyDer<'static>,
 }
 
+fn config_path_with_fallback(primary: &Path, fallback: &Path) -> PathBuf {
+    if primary.exists() {
+        primary.to_path_buf()
+    } else {
+        fallback.to_path_buf()
+    }
+}
+
+fn default_config_path() -> PathBuf {
+    let primary = Path::new(DEFAULT_CONFIG_PATH);
+    let fallback = Path::new(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_CONFIG_PATH);
+    config_path_with_fallback(primary, &fallback)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::config_path_with_fallback;
+
+    const EXISTING_PRIMARY_PATH: &str = ".";
+    const MISSING_PRIMARY_PATH: &str = "missing-hyperion-config-primary-for-fallback-test";
+    const FALLBACK_PATH: &str = "fallback-config.toml";
+
+    #[test]
+    fn config_path_uses_existing_primary_path() {
+        let primary = Path::new(EXISTING_PRIMARY_PATH);
+        let fallback = Path::new(FALLBACK_PATH);
+
+        assert_eq!(config_path_with_fallback(primary, fallback), primary);
+    }
+
+    #[test]
+    fn config_path_uses_fallback_when_primary_is_missing() {
+        let primary = Path::new(MISSING_PRIMARY_PATH);
+        let fallback = Path::new(FALLBACK_PATH);
+
+        assert_eq!(config_path_with_fallback(primary, fallback), fallback);
+    }
+}
+
 impl Crypto {
     pub fn new(
         root_ca_cert_path: &Path,
@@ -238,7 +286,7 @@ impl Plugin for HyperionCore {
         });
 
         info!("starting hyperion");
-        let config = config::Config::load("run/config.toml").expect("failed to load config");
+        let config = config::Config::load(default_config_path()).expect("failed to load config");
         app.insert_resource(config);
 
         let runtime = AsyncRuntime::new();

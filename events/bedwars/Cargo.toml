@@ -29,6 +29,8 @@ valence_server = { workspace = true }
 valence_text = { workspace = true }
 
 [dev-dependencies]
+hyperion-proxy = { workspace = true }
+tokio = { workspace = true }
 tracing = { workspace = true, features = ["release_max_level_info"] }
 
 [lints]
