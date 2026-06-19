@@ -82,19 +82,67 @@ const MAX_SUPPORTED_IROH_RELAY_URLS: usize = 1;
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        net::{Ipv4Addr, SocketAddrV4},
+        task::{Context, Poll},
+    };
+
+    use anyhow::Context as _;
+    use hyperion_proto::ArchivedProxyToServerMessage;
+    use tokio::io::AsyncReadExt as _;
+
     use super::*;
 
     const IROH_SECRET_KEY_BYTES: usize = 32;
     const SERVER_KEY_SEED: u8 = 1;
+    const PROXY_KEY_SEED: u8 = 2;
     const FIRST_RELAY_URL: &str = "https://relay-one.example.com";
     const SECOND_RELAY_URL: &str = "https://relay-two.example.com";
+    const SMOKE_TIMEOUT: Duration = Duration::from_secs(10);
+    const EPHEMERAL_PORT: u16 = 0;
+
+    struct PendingListener;
+
+    impl Listener for PendingListener {
+        type Addr = SocketAddr;
+        type Io = tokio::io::DuplexStream;
+
+        fn poll_accept(
+            &mut self,
+            _: &mut Context<'_>,
+        ) -> Poll<std::io::Result<(Self::Io, Self::Addr)>> {
+            Poll::Pending
+        }
+
+        fn local_addr(&self) -> std::io::Result<Self::Addr> {
+            Ok(SocketAddrV4::new(Ipv4Addr::LOCALHOST, EPHEMERAL_PORT).into())
+        }
+    }
 
     fn relay_url(value: &str) -> RelayUrl {
         value.parse().unwrap()
     }
 
+    fn secret_key_from_seed(seed: u8) -> SecretKey {
+        SecretKey::from([seed; IROH_SECRET_KEY_BYTES])
+    }
+
+    fn local_iroh_bind_addr() -> SocketAddrV4 {
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, EPHEMERAL_PORT)
+    }
+
+    fn direct_node_addr(endpoint: &IrohEndpoint) -> NodeAddr {
+        let (ipv4_addr, ipv6_addr) = endpoint.bound_sockets();
+        let mut direct_addrs = vec![ipv4_addr];
+        if let Some(ipv6_addr) = ipv6_addr {
+            direct_addrs.push(ipv6_addr);
+        }
+
+        NodeAddr::from_parts(endpoint.node_id(), None, direct_addrs)
+    }
+
     fn server_connection(relay_urls: Vec<RelayUrl>) -> IrohServerConnection {
-        let secret_key = SecretKey::from([SERVER_KEY_SEED; IROH_SECRET_KEY_BYTES]);
+        let secret_key = secret_key_from_seed(SERVER_KEY_SEED);
         IrohServerConnection {
             server_id: secret_key.public(),
             direct_addrs: Vec::new(),
@@ -102,6 +150,49 @@ mod tests {
             secret_key: None,
             bind_addr: None,
         }
+    }
+
+    async fn bind_smoke_server() -> anyhow::Result<IrohEndpoint> {
+        IrohEndpoint::builder()
+            .secret_key(secret_key_from_seed(SERVER_KEY_SEED))
+            .bind_addr_v4(local_iroh_bind_addr())
+            .alpns(vec![IROH_PROXY_ALPN.to_vec()])
+            .bind()
+            .await
+            .context("binding Iroh smoke server")
+    }
+
+    async fn bind_smoke_proxy() -> anyhow::Result<IrohEndpoint> {
+        IrohEndpoint::builder()
+            .secret_key(secret_key_from_seed(PROXY_KEY_SEED))
+            .bind_addr_v4(local_iroh_bind_addr())
+            .bind()
+            .await
+            .context("binding Iroh smoke proxy")
+    }
+
+    async fn accept_proxy_ready(endpoint: IrohEndpoint) -> anyhow::Result<bool> {
+        let connection = endpoint
+            .accept()
+            .await
+            .context("Iroh smoke server accepted no incoming connection")?
+            .await
+            .context("accepting Iroh smoke connection")?;
+        let (_send, mut recv) = connection
+            .accept_bi()
+            .await
+            .context("accepting Iroh smoke bidirectional stream")?;
+
+        let len = recv.read_u64().await.context("reading ProxyReady length")?;
+        let len = usize::try_from(len).context("ProxyReady length does not fit usize")?;
+        let mut buffer = vec![0; len];
+        recv.read_exact(&mut buffer)
+            .await
+            .context("reading ProxyReady bytes")?;
+
+        let message =
+            unsafe { rkyv::access_unchecked::<ArchivedProxyToServerMessage<'_>>(&buffer) };
+        Ok(matches!(message, ArchivedProxyToServerMessage::ProxyReady))
     }
 
     #[test]
@@ -121,6 +212,35 @@ mod tests {
         let err = validate_iroh_server_connection(&server).unwrap_err();
 
         assert!(err.to_string().contains("at most one relay URL"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn iroh_proxy_smoke_sends_proxy_ready() {
+        let server_endpoint = bind_smoke_server().await.unwrap();
+        let proxy_endpoint = bind_smoke_proxy().await.unwrap();
+        let server_addr = direct_node_addr(&server_endpoint);
+        let server_task = tokio::spawn(accept_proxy_ready(server_endpoint));
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(None);
+        let mut listener = PendingListener;
+        let proxy_task = tokio::spawn(async move {
+            connect_to_iroh_server_and_run_proxy(
+                &mut listener,
+                proxy_endpoint,
+                server_addr,
+                shutdown_rx,
+                shutdown_tx,
+            )
+            .await
+        });
+
+        let is_proxy_ready = tokio::time::timeout(SMOKE_TIMEOUT, server_task)
+            .await
+            .expect("Iroh smoke timed out waiting for ProxyReady")
+            .expect("Iroh smoke server task panicked")
+            .expect("Iroh smoke server failed");
+        assert!(is_proxy_ready);
+
+        proxy_task.abort();
     }
 }
 
@@ -370,6 +490,7 @@ async fn connect_to_iroh_server_and_run_proxy(
         shutdown_tx,
     )
     .await;
+    drop(connection);
     result
 }
 
@@ -400,6 +521,7 @@ async fn connect_to_tcp_server_and_run_proxy(
         shutdown_tx,
     )
     .await;
+    drop(connector);
     result
 }
 
@@ -557,6 +679,6 @@ where
     }
 }
 
-trait HyperionListener: Listener<Io: Send, Addr: Debug> + 'static {}
+pub trait HyperionListener: Listener<Io: Send, Addr: Debug> + 'static {}
 
 impl<L: Listener<Io: Send, Addr: Debug> + 'static> HyperionListener for L {}

@@ -49,7 +49,7 @@ pub struct IrohProxyBind {
 #[derive(Resource, Debug, Clone)]
 pub enum ProxyBind {
     Tcp(SocketAddr),
-    Iroh(IrohProxyBind),
+    Iroh(Box<IrohProxyBind>),
 }
 
 impl From<SocketAddr> for ProxyBind {
@@ -340,11 +340,7 @@ fn spawn_registered_proxy_connection<R, W>(
         }
     });
 
-    tokio::spawn(handle_proxy_messages(
-        read,
-        command_channel.clone(),
-        proxy_id,
-    ));
+    tokio::spawn(handle_proxy_messages(read, command_channel, proxy_id));
 }
 
 async fn inner_tcp(socket: SocketAddr, crypto: Crypto, command_channel: CommandChannel) {
@@ -545,7 +541,7 @@ pub fn init_proxy_transport_comms(
             runtime.spawn(inner_tcp(socket, crypto, command_channel));
         }
         ProxyBind::Iroh(config) => {
-            runtime.spawn(inner_iroh(config, command_channel));
+            runtime.spawn(inner_iroh(*config, command_channel));
         }
     }
 }

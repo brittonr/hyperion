@@ -30,7 +30,7 @@ const DEFAULT_READ_BUFFER_SIZE: usize = 8 * 1024;
 ///
 /// It also handles player disconnection and shutdown scenarios.
 #[instrument(skip_all, fields(player_id = player_id))]
-pub fn initiate_player_connection(
+pub(crate) fn initiate_player_connection(
     socket: impl tokio::io::AsyncRead + AsyncWrite + Send + 'static,
     mut shutdown_signal: tokio::sync::watch::Receiver<Option<ShutdownType>>,
     player_id: u64,

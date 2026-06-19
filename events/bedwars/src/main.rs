@@ -76,15 +76,14 @@ const fn default_port() -> u16 {
     DEFAULT_SERVER_PORT
 }
 
-fn required_path<'a>(path: &'a Option<PathBuf>, flag: &'static str) -> anyhow::Result<&'a PathBuf> {
-    path.as_ref()
-        .with_context(|| format!("TCP transport requires --{flag}"))
+fn required_path<'a>(path: Option<&'a PathBuf>, flag: &'static str) -> anyhow::Result<&'a PathBuf> {
+    path.with_context(|| format!("TCP transport requires --{flag}"))
 }
 
 fn tcp_crypto(args: &Args) -> anyhow::Result<Crypto> {
-    let root_ca_cert = required_path(&args.root_ca_cert, "root-ca-cert")?;
-    let cert = required_path(&args.cert, "cert")?;
-    let private_key = required_path(&args.private_key, "private-key")?;
+    let root_ca_cert = required_path(args.root_ca_cert.as_ref(), "root-ca-cert")?;
+    let cert = required_path(args.cert.as_ref(), "cert")?;
+    let private_key = required_path(args.private_key.as_ref(), "private-key")?;
 
     Crypto::new(root_ca_cert, cert, private_key).context("failed to load TCP mTLS material")
 }
@@ -96,17 +95,17 @@ fn proxy_bind_from_args(
     match args.proxy_transport {
         ProxyTransport::Tcp => Ok((ProxyBind::Tcp(tcp_address), Some(tcp_crypto(args)?))),
         ProxyTransport::Iroh => Ok((
-            ProxyBind::Iroh(IrohProxyBind {
+            ProxyBind::Iroh(Box::new(IrohProxyBind {
                 secret_key: args.iroh_secret_key.clone(),
                 bind_addr: args.iroh_bind_addr,
                 allowed_proxy_ids: args.iroh_allowed_proxy_id.clone(),
-            }),
+            })),
             None,
         )),
     }
 }
 
-fn cli_args_present(arg_count: usize) -> bool {
+const fn cli_args_present(arg_count: usize) -> bool {
     arg_count > PROCESS_NAME_ARG_COUNT
 }
 
@@ -201,16 +200,16 @@ mod tests {
         args.cert = Some(PathBuf::from("server.crt"));
         args.private_key = Some(PathBuf::from("server_private_key.pem"));
 
-        assert!(required_path(&args.root_ca_cert, "root-ca-cert").is_ok());
-        assert!(required_path(&args.cert, "cert").is_ok());
-        assert!(required_path(&args.private_key, "private-key").is_ok());
+        assert!(required_path(args.root_ca_cert.as_ref(), "root-ca-cert").is_ok());
+        assert!(required_path(args.cert.as_ref(), "cert").is_ok());
+        assert!(required_path(args.private_key.as_ref(), "private-key").is_ok());
     }
 
     #[test]
     fn tcp_transport_rejects_missing_tls_paths() {
         let args = args_for_transport(ProxyTransport::Tcp);
 
-        let err = required_path(&args.root_ca_cert, "root-ca-cert").unwrap_err();
+        let err = required_path(args.root_ca_cert.as_ref(), "root-ca-cert").unwrap_err();
 
         assert!(err.to_string().contains("--root-ca-cert"));
     }

@@ -36,7 +36,7 @@ enum ServerTarget {
         cert: PathBuf,
         private_key: PathBuf,
     },
-    Iroh(IrohServerConnection),
+    Iroh(Box<IrohServerConnection>),
 }
 
 #[derive(Deserialize, Debug, Parser)]
@@ -140,8 +140,8 @@ impl ProxyAddress {
     }
 }
 
-fn required_path(path: &Option<PathBuf>, flag: &'static str) -> anyhow::Result<PathBuf> {
-    path.clone()
+fn required_path(path: Option<&PathBuf>, flag: &'static str) -> anyhow::Result<PathBuf> {
+    path.cloned()
         .with_context(|| format!("TCP transport requires --{flag}"))
 }
 
@@ -171,12 +171,14 @@ async fn server_target_from_params(params: &Params) -> anyhow::Result<ServerTarg
             Ok(ServerTarget::Tcp {
                 server_addr,
                 server_name: params.server.clone(),
-                root_ca_cert: required_path(&params.root_ca_cert, "root-ca-cert")?,
-                cert: required_path(&params.cert, "cert")?,
-                private_key: required_path(&params.private_key, "private-key")?,
+                root_ca_cert: required_path(params.root_ca_cert.as_ref(), "root-ca-cert")?,
+                cert: required_path(params.cert.as_ref(), "cert")?,
+                private_key: required_path(params.private_key.as_ref(), "private-key")?,
             })
         }
-        ServerTransport::Iroh => Ok(ServerTarget::Iroh(iroh_server_connection(params)?)),
+        ServerTransport::Iroh => Ok(ServerTarget::Iroh(Box::new(iroh_server_connection(
+            params,
+        )?))),
     }
 }
 
@@ -202,11 +204,11 @@ where
             )
             .await
         }
-        ServerTarget::Iroh(server) => run_proxy_iroh(listener, server).await,
+        ServerTarget::Iroh(server) => run_proxy_iroh(listener, *server).await,
     }
 }
 
-fn cli_args_present(arg_count: usize) -> bool {
+const fn cli_args_present(arg_count: usize) -> bool {
     arg_count > PROCESS_NAME_ARG_COUNT
 }
 
@@ -310,6 +312,37 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
+struct NoDelayTcpListener {
+    listener: TcpListener,
+}
+
+impl Listener for NoDelayTcpListener {
+    type Addr = <TcpListener as Listener>::Addr;
+    type Io = <TcpListener as Listener>::Io;
+
+    fn poll_accept(
+        &mut self,
+        cx: &mut core::task::Context<'_>,
+    ) -> Poll<std::io::Result<(Self::Io, Self::Addr)>> {
+        let Poll::Ready(result) = self.listener.poll_accept(cx) else {
+            return Poll::Pending;
+        };
+
+        let Ok((socket, addr)) = result else {
+            return Poll::Ready(result);
+        };
+
+        match socket.set_nodelay(true) {
+            Ok(..) => Poll::Ready(Ok((socket, addr))),
+            Err(e) => Poll::Ready(Err(e)),
+        }
+    }
+
+    fn local_addr(&self) -> std::io::Result<Self::Addr> {
+        self.listener.local_addr()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,16 +387,16 @@ mod tests {
         params.cert = Some(PathBuf::from("proxy.crt"));
         params.private_key = Some(PathBuf::from("proxy_private_key.pem"));
 
-        assert!(required_path(&params.root_ca_cert, "root-ca-cert").is_ok());
-        assert!(required_path(&params.cert, "cert").is_ok());
-        assert!(required_path(&params.private_key, "private-key").is_ok());
+        assert!(required_path(params.root_ca_cert.as_ref(), "root-ca-cert").is_ok());
+        assert!(required_path(params.cert.as_ref(), "cert").is_ok());
+        assert!(required_path(params.private_key.as_ref(), "private-key").is_ok());
     }
 
     #[test]
     fn tcp_transport_rejects_missing_tls_paths() {
         let params = params_for_transport(ServerTransport::Tcp);
 
-        let err = required_path(&params.root_ca_cert, "root-ca-cert").unwrap_err();
+        let err = required_path(params.root_ca_cert.as_ref(), "root-ca-cert").unwrap_err();
 
         assert!(err.to_string().contains("--root-ca-cert"));
     }
@@ -386,36 +419,5 @@ mod tests {
         let connection = iroh_server_connection(&params).unwrap();
 
         assert_eq!(connection.server_id, server_secret.public());
-    }
-}
-
-struct NoDelayTcpListener {
-    listener: TcpListener,
-}
-
-impl Listener for NoDelayTcpListener {
-    type Addr = <TcpListener as Listener>::Addr;
-    type Io = <TcpListener as Listener>::Io;
-
-    fn poll_accept(
-        &mut self,
-        cx: &mut core::task::Context<'_>,
-    ) -> Poll<std::io::Result<(Self::Io, Self::Addr)>> {
-        let Poll::Ready(result) = self.listener.poll_accept(cx) else {
-            return Poll::Pending;
-        };
-
-        let Ok((socket, addr)) = result else {
-            return Poll::Ready(result);
-        };
-
-        match socket.set_nodelay(true) {
-            Ok(..) => Poll::Ready(Ok((socket, addr))),
-            Err(e) => Poll::Ready(Err(e)),
-        }
-    }
-
-    fn local_addr(&self) -> std::io::Result<Self::Addr> {
-        self.listener.local_addr()
     }
 }
