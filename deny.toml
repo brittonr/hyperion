@@ -11,6 +11,26 @@
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
+  # bincode is pulled through heed/syntect; the advisory has no safe upgrade.
+  "RUSTSEC-2025-0141",
+  # hickory-proto 0.25 is pulled by Iroh 0.35; Iroh has no 0.35 patch release and 1.0 needs a newer Rust.
+  "RUSTSEC-2026-0118",
+  "RUSTSEC-2026-0119",
+  # instant is pulled by older Bevy/Valence transitive dependencies; the advisory has no safe upgrade.
+  "RUSTSEC-2024-0384",
+  # paste is used directly and transitively; the advisory is unmaintained/no safe upgrade, not a vulnerability.
+  "RUSTSEC-2024-0436",
+  # rustls-pemfile is still pulled by reqwest/Iroh; the advisory has no safe upgrade.
+  "RUSTSEC-2025-0134",
+  # rustls-webpki 0.102 is pulled by Iroh 0.35; upgrading requires an Iroh line that exceeds this repo's Rust pin.
+  "RUSTSEC-2026-0049",
+  "RUSTSEC-2026-0098",
+  "RUSTSEC-2026-0099",
+  "RUSTSEC-2026-0104",
+  # time's fixed release currently requires Rust 1.88; Hyperion is pinned to nightly-2025-02-22 (rustc 1.87).
+  "RUSTSEC-2026-0009",
+  # yaml-rust is pulled by syntect for packet-inspector themes; the advisory has no safe upgrade.
+  "RUSTSEC-2024-0320",
 ]
 
 # This section is considered when running `cargo deny check bans`.
@@ -125,7 +145,10 @@ allow = [
   "OpenSSL",
   "ISC",
   "MPL-2.0",
-  "BSD-2-Clause"
+  "BSD-2-Clause",
+  "OFL-1.1",
+  "Ubuntu-font-1.0",
+  "CC0-1.0"
 ]
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
@@ -172,8 +195,9 @@ feature-depth = 1
 [sources]
 # List of URLs for allowed Git repositories
 allow-git = [
-  "https://github.com/andrewgazelka/valence",
-  "https://github.com/andrewgazelka/bvh-data",
+  "https://github.com/TestingPlant/valence",
+  "https://github.com/TestingPlant/bvh-data",
+  "https://github.com/nvzqz/divan",
   "https://github.com/Indra-db/Flecs-Rust"
 ]
 # List of URLs for allowed crate registries. Defaults to the crates.io index

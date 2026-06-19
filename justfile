@@ -56,11 +56,11 @@ bedwars-full:
 
 # cargo machete
 unused-deps:
-    cargo machete
+    cargo-machete --with-metadata
 
 # cargo deny
 deny:
-    cargo deny check
+    cargo-deny check
 
 # Watch and rebuild release version
 watch-bedwars:

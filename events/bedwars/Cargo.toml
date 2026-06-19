@@ -2,10 +2,9 @@
 anyhow = { workspace = true }
 bevy = { workspace = true }
 clap = { workspace = true }
-compact_str = { workspace = true }
 derive_more = { workspace = true }
 dotenvy = { workspace = true }
-envy = "0.4"
+envy = { workspace = true }
 fastrand = { workspace = true }
 geometry = { workspace = true }
 glam = { workspace = true }
@@ -17,14 +16,10 @@ hyperion-inventory = { workspace = true }
 hyperion-item = { workspace = true }
 hyperion-permission = { workspace = true }
 hyperion-proxy-module = { workspace = true }
-hyperion-scheduled = { workspace = true }
-hyperion-text = { workspace = true }
 hyperion-utils = { workspace = true }
 rayon = { workspace = true }
 roaring = { workspace = true }
-rustc-hash = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
-tap = "1.0.1"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
@@ -46,6 +41,9 @@ name = "bedwars"
 publish = false
 readme = "README.md"
 version.workspace = true
+
+[package.metadata.cargo-machete]
+ignored = ["hyperion-utils", "tracing"]
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 tikv-jemallocator.workspace = true

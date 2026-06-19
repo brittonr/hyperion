@@ -7,7 +7,7 @@ rkyv = { workspace = true }
 rustc-hash = { workspace = true }
 rustls = { workspace = true }
 rustls-pki-types = { workspace = true }
-rustls-webpki = { workspace = true }
+webpki = { workspace = true }
 tokio = { workspace = true, features = ["full", "tracing"] }
 tokio-rustls = { workspace = true }
 tokio-util = { workspace = true, features = ["full"] }
@@ -16,16 +16,14 @@ bvh = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true }
 glam = { workspace = true }
-heapless = { workspace = true }
 hyperion-proto = { workspace = true }
 iroh = { workspace = true }
-more-asserts = { workspace = true }
 slotmap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
-envy = "0.4"
-dotenvy = "0.15"
+envy = { workspace = true }
+dotenvy = { workspace = true }
 
 [lints]
 workspace = true

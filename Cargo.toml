@@ -43,7 +43,13 @@ members = [
     'tools/packet-inspector',
     'tools/rust-mc-bot',
 ]
+exclude = [
+    'tools/antithesis-bot',
+]
 resolver = '2'
+
+[workspace.metadata.cargo-machete]
+ignored = ["quote", "serde_json", "syn", "valence_build_utils"]
 
 [workspace.dependencies]
 anyhow = '1.0.98'
@@ -68,6 +74,7 @@ eframe = "0.31.0"
 egui = "0.31.0"
 egui_dock = "0.16.0"
 enumset = '1.1.6'
+envy = "0.4.2"
 fastrand = '2.1.0'
 flume = '0.11.1'
 futures-util = '0.3.31'
@@ -102,7 +109,7 @@ rayon = '1.10.0'
 rkyv = '0.8.8'
 rustls = { version = '0.23.31', default-features = false, features = ['logging', 'std', 'tls12'] }
 rustls-pki-types = '1.12.0'
-rustls-webpki = '0.103.4'
+webpki = { package = 'rustls-webpki', version = '0.103.4' }
 serde = '1.0.217'
 serde_json = '1.0.140'
 serial_test = '3.2.0'

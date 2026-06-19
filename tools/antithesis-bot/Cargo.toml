@@ -1,21 +1,20 @@
 [package]
 name = "antithesis-bot"
-version.workspace = true
+version = "0.1.0"
 authors = ["Andrew Gazelka <andrew.gazelka@gmail.com>"]
-edition.workspace = true
+edition = "2024"
+license = "Apache-2.0"
+publish = false
 
 [dependencies]
-antithesis_sdk.workspace = true
+antithesis_sdk = "0.2.9"
 bytes = "1.9.0"
-dotenvy.workspace = true
-envy.workspace = true
-eyre.workspace = true
-regex = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-tokio = { workspace = true, features = ["full"] }
-tracing-subscriber.workspace = true
-tracing.workspace = true
-valence_protocol.workspace = true
-
-[lints]
-workspace = true
+dotenvy = "0.15.7"
+envy = "0.4.2"
+eyre = "0.6.12"
+regex = "1.12.4"
+serde = { version = "1.0.217", features = ["derive"] }
+tokio = { version = "1.45.0", features = ["full"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "time"] }
+tracing = { version = "0.1.40", features = ["release_max_level_info"] }
+valence_protocol = { git = "https://github.com/TestingPlant/valence", branch = "feat-bytes", features = ["compression"] }

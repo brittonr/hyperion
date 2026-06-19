@@ -9,7 +9,13 @@
     };
   };
 
-  outputs = { self, nixpkgs, rust-overlay, ... }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      rust-overlay,
+      ...
+    }:
     let
       forAllSystems = nixpkgs.lib.genAttrs [
         "x86_64-linux"
@@ -18,7 +24,8 @@
         "aarch64-darwin"
       ];
 
-      mkSystem = system:
+      mkSystem =
+        system:
         let
           overlays = [ (import rust-overlay) ];
           pkgs = import nixpkgs {
@@ -26,21 +33,32 @@
           };
 
           rustToolchain = pkgs.rust-bin.nightly."2025-02-22".default.override {
-            extensions = [ "rust-src" "rustfmt" "clippy" ];
+            extensions = [
+              "rust-src"
+              "rustfmt"
+              "clippy"
+            ];
           };
 
           nativeBuildInputs = with pkgs; [
             rustToolchain
             pkg-config
             cmake
+            just
+            cargo-deny
+            cargo-machete
+            cargo-nextest
           ];
 
-          buildInputs = with pkgs; [
-            openssl
-          ] ++ lib.optionals stdenv.isDarwin [
-            darwin.apple_sdk.frameworks.Security
-            darwin.apple_sdk.frameworks.SystemConfiguration
-          ];
+          buildInputs =
+            with pkgs;
+            [
+              openssl
+            ]
+            ++ lib.optionals stdenv.isDarwin [
+              darwin.apple_sdk.frameworks.Security
+              darwin.apple_sdk.frameworks.SystemConfiguration
+            ];
 
           hyperion = pkgs.rustPlatform.buildRustPackage {
             pname = "hyperion";
@@ -81,7 +99,10 @@
             contents = [ minimalEnv ];
 
             config = {
-              Cmd = [ "/bin/hyperion-proxy" "0.0.0.0:8080" ];
+              Cmd = [
+                "/bin/hyperion-proxy"
+                "0.0.0.0:8080"
+              ];
               ExposedPorts = {
                 "8080/tcp" = { };
               };
@@ -96,7 +117,13 @@
             contents = [ minimalEnv ];
 
             config = {
-              Cmd = [ "/bin/bedwars" "--ip" "0.0.0.0" "--port" "35565" ];
+              Cmd = [
+                "/bin/bedwars"
+                "--ip"
+                "0.0.0.0"
+                "--port"
+                "35565"
+              ];
               ExposedPorts = {
                 "35565/tcp" = { };
               };

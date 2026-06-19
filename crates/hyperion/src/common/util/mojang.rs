@@ -105,13 +105,7 @@ impl MojangClient {
         let url = self.provider.username_url(username);
         let json_object = self.response_raw(&url).await?;
 
-        let id = json_object
-            .get("id")
-            .context("no id in json")?
-            .as_str()
-            .context("id is not a string")?;
-
-        Uuid::parse_str(id).map_err(Into::into)
+        uuid_from_profile_response(&json_object)
     }
 
     /// Gets a player's username from their UUID.
@@ -119,12 +113,7 @@ impl MojangClient {
         let url = self.provider.uuid_url(&uuid);
         let json_object = self.response_raw(&url).await?;
 
-        json_object
-            .get("name")
-            .context("no name in json")?
-            .as_str()
-            .map(String::from)
-            .context("Username not found")
+        username_from_profile_response(&json_object)
     }
 
     /// Gets player data from their UUID.
@@ -172,76 +161,92 @@ impl MojangClient {
     }
 }
 
-#[cfg(test)]
-#[expect(clippy::unwrap_used, clippy::print_stdout, reason = "these are tests")]
-mod tests {
-    use std::str::FromStr;
+fn uuid_from_profile_response(json_object: &Value) -> anyhow::Result<Uuid> {
+    let id = json_object
+        .get("id")
+        .context("no id in json")?
+        .as_str()
+        .context("id is not a string")?;
 
-    use crate::{
-        runtime::AsyncRuntime,
-        util::mojang::{ApiProvider, MojangClient},
-    };
+    Uuid::parse_str(id).map_err(Into::into)
+}
+
+fn username_from_profile_response(json_object: &Value) -> anyhow::Result<String> {
+    json_object
+        .get("name")
+        .context("no name in json")?
+        .as_str()
+        .map(String::from)
+        .context("Username not found")
+}
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "these are tests")]
+mod tests {
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use super::{ApiProvider, username_from_profile_response, uuid_from_profile_response};
+
+    const PROFILE_UUID_HYPHENATED: &str = "86271406-1188-44a5-8496-7af10c906204";
+    const PROFILE_UUID_COMPACT: &str = "86271406118844a584967af10c906204";
+    const PROFILE_NAME: &str = "Emerald_Explorer";
+
+    fn profile_json() -> serde_json::Value {
+        json!({
+            "id": PROFILE_UUID_COMPACT,
+            "name": PROFILE_NAME,
+            "profileActions": []
+        })
+    }
 
     #[test]
-    fn test_get_uuid() {
-        let tasks = AsyncRuntime::new();
-        let mojang = MojangClient::new(&tasks, ApiProvider::MAT_DOES_DEV);
+    fn uuid_from_profile_response_accepts_compact_uuid() {
+        let uuid = uuid_from_profile_response(&profile_json()).unwrap();
+        let expected = Uuid::parse_str(PROFILE_UUID_HYPHENATED).unwrap();
 
-        let uuid = tasks.block_on(mojang.get_uuid("Emerald_Explorer")).unwrap();
-        let expected = uuid::Uuid::from_str("86271406-1188-44a5-8496-7af10c906204").unwrap();
         assert_eq!(uuid, expected);
     }
 
     #[test]
-    fn test_get_username() {
-        let tasks = AsyncRuntime::new();
-        let mojang = MojangClient::new(&tasks, ApiProvider::MAT_DOES_DEV);
+    fn uuid_from_profile_response_rejects_missing_id() {
+        let err = uuid_from_profile_response(&json!({ "name": PROFILE_NAME })).unwrap_err();
 
-        let username = tasks
-            .block_on(mojang.get_username(
-                uuid::Uuid::from_str("86271406-1188-44a5-8496-7af10c906204").unwrap(),
-            ))
-            .unwrap();
-        assert_eq!(username, "Emerald_Explorer");
+        assert!(err.to_string().contains("no id"));
     }
 
     #[test]
-    fn test_retrieve_username() {
-        let tasks = AsyncRuntime::new();
-        let mojang = MojangClient::new(&tasks, ApiProvider::MAT_DOES_DEV);
+    fn username_from_profile_response_accepts_name() {
+        let username = username_from_profile_response(&profile_json()).unwrap();
 
-        let res = tasks
-            .block_on(mojang.data_from_uuid(
-                &uuid::Uuid::from_str("86271406-1188-44a5-8496-7af10c906204").unwrap(),
-            ))
-            .unwrap();
+        assert_eq!(username, PROFILE_NAME);
+    }
 
-        // {
-        //   "id": "86271406118844a584967af10c906204",
-        //   "name": "Emerald_Explorer",
-        //   "profileActions": [],
-        //   "properties": [
-        //     {
-        //       "name": "textures",
-        //       "signature": "vSdWxKrUendEP7rapc8Kw2RP6oxWH75CaDrdLXIZlXRmM3+lIYbxaUr8feA0gtZTdiJPTA9GstQHr6mIz1Ap2gm6pd50LVj22yRA1e1qgmAEq8L6EZj7MPnN/kgvWnUj2XFdhP1TsENi3ekvDLHuvRSdeOKgdew3u6/3h6DLAZp/6w2Z89wRJRytWDrSxm3YrPJpGyUA0DjYkoKlCi2n4fd6iTxGzPCnN0gi/y1ewEGbz9rVSsN9EX+tecACl/W4PAOo2wtSEDBziHOMmAEFunmzVReo24XNTTTqQNf6wywAFbXRPaSsRayYrc1vwPXNj4mZwep1LbP8/qQsefjNi3olBmXLxnyxD62Zyx2ZK3NBD1Qbc40PiM6qhpuoQxUgPQHTxL3XazzatH4sQv11rWxLYJhppVsWxUNMy696e5JK7oVtUgSSPbqVjQYdPpn/z22ZzwXh3Y0vkbxfTZ8aZSxEYhJzUtlDNFKcaWEPzuohBsUPELISELLWmL46Rue96gR2lUxdStlUR15L4XZ3cpINTCLj1AQdl2q6mP0T7ooG/Cvri0qKtZ/RuJ3HUZMFfZB6SQ5LGbpwfwPwCWxgYkpwhIUNvLBaEQQNDXELmYgomLE1rd/q6FdM4HaSYCqxBgMyQPzkeOkrZ4k9pBaU16rRWwkCvek4Evdz2L5cpMo=",
-        //       "value": "ewogICJ0aW1lc3RhbXAiIDogMTczMDY0Mjc1NjU0OCwKICAicHJvZmlsZUlkIiA6ICI4NjI3MTQwNjExODg0NGE1ODQ5NjdhZjEwYzkwNjIwNCIsCiAgInByb2ZpbGVOYW1lIiA6ICJFbWVyYWxkX0V4cGxvcmVyIiwKICAic2lnbmF0dXJlUmVxdWlyZWQiIDogdHJ1ZSwKICAidGV4dHVyZXMiIDogewogICAgIlNLSU4iIDogewogICAgICAidXJsIiA6ICJodHRwOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlLzE1MTBlM2VlM2YwZThkNTJhMGUxZjMzY2UwYmJiZTRhZWE4Yjg4MzhjOWJkYzQ5NjEzNDI2ZWJhYjYxNGE2ODMiCiAgICB9CiAgfQp9"
-        //     }
-        //   ]
-        // }
+    #[test]
+    fn username_from_profile_response_rejects_non_string_name() {
+        let err = username_from_profile_response(&json!({ "name": true })).unwrap_err();
 
-        // {
-        //   "timestamp" : 1730642756548,
-        //   "profileId" : "86271406118844a584967af10c906204",
-        //   "profileName" : "Emerald_Explorer",
-        //   "signatureRequired" : true,
-        //   "textures" : {
-        //     "SKIN" : {
-        //       "url" : "http://textures.minecraft.net/texture/1510e3ee3f0e8d52a0e1f33ce0bbbe4aea8b8838c9bdc49613426ebab614a683"
-        //     }
-        //   }
-        // }⏎
+        assert!(err.to_string().contains("Username not found"));
+    }
 
-        let pretty = serde_json::to_string_pretty(&res).unwrap();
-        println!("{pretty}");
+    #[test]
+    fn api_provider_formats_username_url() {
+        let url = ApiProvider::MAT_DOES_DEV.username_url(PROFILE_NAME);
+
+        assert_eq!(
+            url,
+            "https://mowojang.matdoes.dev/users/profiles/minecraft/Emerald_Explorer"
+        );
+    }
+
+    #[test]
+    fn api_provider_formats_signed_uuid_url() {
+        let uuid = Uuid::parse_str(PROFILE_UUID_HYPHENATED).unwrap();
+        let url = ApiProvider::MAT_DOES_DEV.uuid_url(&uuid);
+
+        assert_eq!(
+            url,
+            "https://mowojang.matdoes.dev/session/minecraft/profile/86271406-1188-44a5-8496-7af10c906204?unsigned=false"
+        );
     }
 }
